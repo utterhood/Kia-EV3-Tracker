@@ -6,6 +6,10 @@ html{scroll-behavior:smooth;scroll-padding-top:14px}[hidden]{display:none!import
 
 /* Optional pricing and one responsive detail panel. */
 .table-controls{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.columns-menu{font-size:12px;min-width:90px}.columns-menu summary{padding:7px 10px;border:1px solid var(--line);border-radius:6px}.columns-menu>div{padding:8px 4px}.columns-menu label{flex-direction:row;align-items:center;padding:3px 0}.pricing-note{padding:0 16px 12px;font-size:11px;color:var(--muted);max-width:1150px}.price-cell{white-space:nowrap;font-variant-numeric:tabular-nums}.price-cell small{display:block;font-size:10px;color:#87531e}#vehicle-detail{margin:0 16px 16px;padding:16px;background:#f1f7f4;border:1px solid var(--line);border-radius:7px;min-width:0}.detail-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}.detail-heading h3{margin:0;font-size:15px}.detail-heading button{padding:5px 8px;font-size:11px}.pricing-context{font-size:12px;color:var(--teal);margin-top:8px}.detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 20px;margin:14px 0}.detail-grid dt{font-size:11px;color:var(--muted)}.detail-grid dd{margin:3px 0 0;overflow-wrap:anywhere;font-size:13px}.detail-grid div:first-child dd{font-family:Consolas,monospace}#vehicle-detail>a{display:inline-block;margin-top:10px;font-size:12px}@media(max-width:850px){.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:480px){.detail-grid{grid-template-columns:1fr}.table-controls{gap:10px}#vehicle-detail{margin:0 10px 12px;padding:12px}}
+
+/* Checkbox multi-select filters: body-level popup avoids panel clipping. */
+#selects .multi-filter{flex:1;min-width:115px;max-width:230px;color:var(--muted);font-size:11px;display:flex;flex-direction:column;gap:4px}.filter-toggle{width:100%;min-height:37px;padding:8px 24px 8px 8px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;font-size:12px}.filter-toggle:after{content:"▾";position:absolute;right:8px}.filter-toggle[aria-expanded=true]{border-color:var(--teal)}.filter-popup{position:fixed;z-index:1000;background:white;border:1px solid #b8cdc5;border-radius:8px;box-shadow:0 8px 28px #19313d33;padding:10px;display:flex;flex-direction:column;gap:7px;overflow:hidden;color:var(--ink);font-size:12px}.filter-toolbar{display:flex;justify-content:space-between;gap:8px;flex-shrink:0}.filter-toolbar button{min-height:44px}.filter-popup input[type=search]{width:100%;min-height:44px;flex-shrink:0}.filter-help{font-size:11px;color:var(--muted);flex-shrink:0}.filter-options{overflow:auto;overscroll-behavior:contain;min-height:0;flex:1}.filter-option{display:flex;flex-direction:row;align-items:center;gap:9px;min-height:44px;padding:8px 4px;font-size:12px;color:var(--ink);cursor:pointer}.filter-option:hover{background:#edf5f1}.filter-option input{width:19px;height:19px;flex-shrink:0;accent-color:var(--teal)}.filter-option span{overflow-wrap:anywhere}.filter-option small{margin-left:auto;font-size:10px;color:var(--muted)}@media(pointer:coarse){.filter-toggle{min-height:44px}}
+@media(max-width:650px){.filter-popup input[type=search]{font-size:16px}}
 </style></head>
 <body><header><div class="brand">EV3 <span>Tracker</span></div><div class="header-links"><a href="#movement">Trends</a><a href="#inventory">Inventory</a><a href="#returns">Reappearances</a></div><span class="readonly">Read-only daily snapshot</span></header>
 <main><div class="heading"><div><p class="eyebrow">KIA EV3 · NATIONAL INVENTORY</p><h1>Inventory &amp; market movement</h1><p class="muted" id="snapshot"></p></div><div class="snapshot-note" id="freshness"></div></div>
@@ -59,15 +63,53 @@ for(const [key,title] of Object.entries(titles)){
  const button=el('button',`${title} (${fmt(data.views[key].length)})`);button.dataset.view=key;
  button.onclick=()=>{view=key;scope='all';page=0;render();};$('views').append(button);
 }
+const filterControls={};let openFilter=null;
+function closeFilter(focus=false){if(!openFilter)return;const control=filterControls[openFilter];control.panel.hidden=true;control.button.setAttribute('aria-expanded','false');openFilter=null;if(focus)control.button.focus();}
+function positionFilter(){
+ if(!openFilter)return;const {button,panel}=filterControls[openFilter],rect=button.getBoundingClientRect();
+ if(rect.bottom<0||rect.top>innerHeight){closeFilter();return;}
+ const viewport=window.visualViewport,top=viewport?.offsetTop||0,height=viewport?.height||innerHeight;
+ const width=Math.min(360,innerWidth-24),below=top+height-rect.bottom-16,above=rect.top-top-16,up=below<220&&above>below,compact=Math.max(above,below)<240;
+ panel.style.width=width+'px';panel.style.left=Math.max(12,Math.min(rect.left,innerWidth-width-12))+'px';
+ panel.style.maxHeight=Math.max(100,Math.min(430,compact?height-24:up?above:below))+'px';panel.style.bottom='auto';
+ panel.style.top=(compact?top+12:up?Math.max(top+12,rect.top-panel.getBoundingClientRect().height-4):Math.max(top+12,rect.bottom+4))+'px';
+}
 for(const [key,title] of Object.entries(fields)){
- const label=el('label',title),select=el('select');select.id=`filter-${key}`;select.append(new Option(`All ${title.toLowerCase()}`,''));
- const values=[...new Set(data.rows.map(r=>r[key]))].sort((a,b)=>a.localeCompare(b));
- for(const value of values) select.append(new Option(value||'(Unknown)',value||'__blank__'));
- select.onchange=()=>{filters[key]=select.value;if(key==='dealer'||key==='state')dealerSite=null;page=0;render();};label.append(select);$('selects').append(label);
+ filters[key]=new Set();
+ const wrapper=el('div',undefined,'multi-filter'),label=el('span',title),button=el('button','All','filter-toggle');
+ label.id=`filter-label-${key}`;button.id=`filter-${key}`;button.type='button';button.setAttribute('aria-labelledby',label.id+' '+button.id);button.setAttribute('aria-expanded','false');button.setAttribute('aria-controls',`filter-panel-${key}`);
+ const panel=el('div',undefined,'filter-popup');panel.id=`filter-panel-${key}`;panel.hidden=true;panel.setAttribute('role','group');panel.setAttribute('aria-label',title+' selections');
+ const toolbar=el('div',undefined,'filter-toolbar'),all=el('button','All / clear','filter-all'),done=el('button','Done');
+ all.type=done.type='button';all.onclick=()=>{filters[key].clear();if(key==='dealer'||key==='state')dealerSite=null;page=0;render();};done.onclick=()=>closeFilter(true);toolbar.append(all,done);
+ const search=el('input');search.type='search';search.placeholder='Find '+title.toLowerCase();search.setAttribute('aria-label','Find '+title.toLowerCase()+' options');
+ const note=el('p',undefined,'filter-help');note.textContent='Any selected value matches. No selections means All.';
+ const list=el('div',undefined,'filter-options'),options=[];
+ for(const value of [...new Set(data.rows.map(r=>r[key]))].sort((a,b)=>a.localeCompare(b))){
+  const row=el('label',undefined,'filter-option'),box=el('input'),text=el('span',value||'(Unknown)'),availability=el('small');box.type='checkbox';box.value=value;
+  box.onchange=()=>{if(box.checked)filters[key].add(value);else filters[key].delete(value);if(key==='dealer'||key==='state')dealerSite=null;page=0;render();};
+  row.append(box,text,availability);list.append(row);options.push({value,row,box,availability});
+ }
+ search.oninput=()=>{for(const option of options)option.row.hidden=!(option.value||'(Unknown)').toLowerCase().includes(search.value.toLowerCase().trim());};
+ panel.append(toolbar,search,note,list);document.body.append(panel);wrapper.append(label,button);$('selects').append(wrapper);
+ filterControls[key]={button,panel,options,search};button.onclick=()=>{if(openFilter===key){closeFilter();return;}closeFilter();openFilter=key;search.value='';search.oninput();panel.hidden=false;button.setAttribute('aria-expanded','true');positionFilter();(matchMedia('(pointer:fine)').matches?search:all).focus({preventScroll:true});};
+ button.onkeydown=e=>{if(e.key==='ArrowDown'){e.preventDefault();if(openFilter!==key)button.click();options[0]?.box.focus();}};
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openFilter){e.preventDefault();closeFilter(true);}});
+document.addEventListener('pointerdown',e=>{if(openFilter){const c=filterControls[openFilter];if(!c.panel.contains(e.target)&&!c.button.contains(e.target))closeFilter();}});
+document.addEventListener('focusin',e=>{if(openFilter){const c=filterControls[openFilter];if(!c.panel.contains(e.target)&&!c.button.contains(e.target))closeFilter();}});
+addEventListener('resize',positionFilter);addEventListener('scroll',positionFilter,true);
+window.visualViewport?.addEventListener('resize',positionFilter);window.visualViewport?.addEventListener('scroll',positionFilter);
+function syncFilters(){
+ const available=Object.fromEntries(Object.keys(fields).map(k=>[k,new Set(data.rows.filter(r=>sets[view].has(r.vin)).map(r=>r[k]))]));let unavailable=0;
+ for(const [key,c] of Object.entries(filterControls)){
+  const selected=[...filters[key]];c.button.textContent=selected.length===0?'All':selected.length===1?(selected[0]||'(Unknown)'):selected.length+' selected';c.button.title=selected.map(v=>v||'(Unknown)').join(', ')||'All';
+  for(const o of c.options){o.box.checked=filters[key].has(o.value);const absent=!available[key].has(o.value);o.availability.textContent=absent?'Not in this view':'';if(absent&&o.box.checked)unavailable++;}
+ }
+ return unavailable;
 }
 function selectRows(){
  const words=$('search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
- return data.rows.filter(r=>sets[view].has(r.vin)&&(!dealerSite||JSON.stringify([r.dealer,r.city,r.state])===dealerSite)&&(scope==='all'||scope==='presumed'&&r.status==='Absent / Dropped'&&r.lastStatus==='DS'||scope==='returned'&&data.returnedVins.includes(r.vin))&&Object.entries(filters).every(([k,v])=>!v||(v==='__blank__'?!r[k]:r[k]===v))&&words.every(w=>[r.vin,r.dealer,r.city,r.zip].join(' ').toLowerCase().includes(w)))
+ return data.rows.filter(r=>sets[view].has(r.vin)&&(!dealerSite||JSON.stringify([r.dealer,r.city,r.state])===dealerSite)&&(scope==='all'||scope==='presumed'&&r.status==='Absent / Dropped'&&r.lastStatus==='DS'||scope==='returned'&&data.returnedVins.includes(r.vin))&&Object.entries(filters).every(([k,values])=>values.size===0||values.has(r[k]))&&words.every(w=>[r.vin,r.dealer,r.city,r.zip].join(' ').toLowerCase().includes(w)))
  .sort((a,b)=>{
   if(pricingColumns.some(([k])=>k===sortKey)){
    const x=a.pricing[sortKey],y=b.pricing[sortKey];if(x===null||y===null)return x===y?a.vin.localeCompare(b.vin):x===null?1:-1;
@@ -97,7 +139,7 @@ function render(){
  renderDetail(rows);
  renderBreakdowns(rows);
  $('scope-label').textContent=(scope==='all'?'All VINs in selected view':scope==='presumed'?'Drilldown: presumed sales (currently absent DS)':'Drilldown: VINs with an observed DS reappearance')+(dealerSite?' · Dealer location: '+JSON.parse(dealerSite).join(', '):'');$('clear-scope').hidden=scope==='all'&&!dealerSite;
- $('result-count').textContent=`${fmt(rows.length)} of ${fmt(data.views[view].length)} VINs · Filters stay applied across views`;
+ const unavailable=syncFilters();$('result-count').textContent=`${fmt(rows.length)} of ${fmt(data.views[view].length)} VINs · Filters stay applied across views`+(unavailable?` · ${unavailable} selected option(s) not in this view; selections retained`:'');
  const columns=[...baseColumns];columns.splice(8,0,...pricingColumns.filter(([key])=>visiblePricing.has(key)));if($('secondary').checked)columns.push(['zip','Dealer ZIP'],['lastStatus','Last observed status']);
  const hr=el('tr');for(const [key,title] of columns){const th=el('th');th.scope='col';if(key==='sticker'){th.append(el('span',title));}else{th.setAttribute('aria-sort',sortKey===key?(direction===1?'ascending':'descending'):'none');const b=el('button',title+(sortKey===key?(direction===1?' ↑':' ↓'):''));b.onclick=()=>{direction=sortKey===key?-direction:1;sortKey=key;page=0;render();};th.append(b);}hr.append(th);}$('head').replaceChildren(hr);
  const body=document.createDocumentFragment();for(const r of rows.slice(page*pageSize,(page+1)*pageSize)){const tr=el('tr');for(const [key] of columns){const td=el('td');td.dataset.column=key;if(key==='sticker'){const a=el('a','View sticker ↗');a.href=r.sticker;a.target='_blank';a.rel='noopener noreferrer';a.setAttribute('aria-label',`Window sticker for ${r.vin}`);td.append(a);}else if(key==='vin'){
@@ -113,12 +155,12 @@ $('search').oninput=()=>{page=0;render();};$('secondary').onchange=render;
 $('reset').onclick=()=>{clearFilters();scope='all';page=0;render();};
 $('prev').onclick=()=>{page--;render();};$('next').onclick=()=>{page++;render();};
 
-function clearFilters(){dealerSite=null;for(const k of Object.keys(fields)){filters[k]='';$(`filter-${k}`).value='';}$('search').value='';}
+function clearFilters(){dealerSite=null;for(const k of Object.keys(fields))filters[k].clear();$('search').value='';}
 function drill(which){clearFilters();view='master';scope=which;page=0;render();$('inventory').scrollIntoView({behavior:'smooth',block:'start'});}
 $('presumed-drill').onclick=()=>drill('presumed');$('returns-drill').onclick=()=>drill('returned');
 $('clear-scope').onclick=()=>{scope='all';dealerSite=null;page=0;render();};
 function groupRows(rows,keys){const groups=new Map();for(const r of rows){const values=keys.map(k=>r[k]),id=JSON.stringify(values);if(!groups.has(id))groups.set(id,{values,count:0});groups.get(id).count++;}return [...groups.values()].sort((a,b)=>b.count-a.count||a.values.join().localeCompare(b.values.join()));}
-function bars(id,rows,keys){const groups=groupRows(rows,keys),root=$(id);root.replaceChildren();if(!groups.length){root.append(el('p','No matches','muted'));return;}const max=groups[0].count;for(const g of groups){const b=el('button',undefined,'bar-row');b.dataset.count=g.count;const label=g.values.map(v=>v||'Unknown').join(' · ');b.setAttribute('aria-label',`${label}: ${g.count} VINs. Filter`);const title=el('span',label),value=el('strong',fmt(g.count)),track=el('span',undefined,'bar-track'),fill=el('i');fill.style.width=`${100*g.count/max}%`;track.append(fill);b.append(title,value,track);b.onclick=()=>{if(keys.length===3&&keys[0]==='dealer')dealerSite=JSON.stringify(g.values);keys.forEach((k,i)=>{if($(`filter-${k}`)){filters[k]=g.values[i]||'__blank__';$(`filter-${k}`).value=filters[k];}});page=0;render();};root.append(b);}}
+function bars(id,rows,keys){const groups=groupRows(rows,keys),root=$(id);root.replaceChildren();if(!groups.length){root.append(el('p','No matches','muted'));return;}const max=groups[0].count;for(const g of groups){const b=el('button',undefined,'bar-row');b.dataset.count=g.count;const label=g.values.map(v=>v||'Unknown').join(' · ');b.setAttribute('aria-label',`${label}: ${g.count} VINs. Filter`);const title=el('span',label),value=el('strong',fmt(g.count)),track=el('span',undefined,'bar-track'),fill=el('i');fill.style.width=`${100*g.count/max}%`;track.append(fill);b.append(title,value,track);b.onclick=()=>{if(keys.length===3&&keys[0]==='dealer')dealerSite=JSON.stringify(g.values);keys.forEach((k,i)=>{if($(`filter-${k}`)){filters[k]=new Set([g.values[i]]);}});page=0;render();};root.append(b);}}
 function renderBreakdowns(rows){$('mix-caption').textContent=`${titles[view]} · ${fmt(rows.length)} matching VINs · Filters apply to all three panels`;bars('combinations',rows,['trim','drive']);bars('colors',rows,['color']);bars('geography',rows,$('geography-mode').value==='dealer'?['dealer','city','state']:['state']);}
 $('geography-mode').onchange=()=>renderBreakdowns(selectRows());
 const ns='http://www.w3.org/2000/svg';
@@ -135,4 +177,5 @@ for(const [key,label] of [['same day','Same day'],['1 day(s)','1 day'],['2 day(s
 $('dealer-continuity').textContent=`${re.dealer_results.same||0} same dealer · ${re.dealer_results.different||0} different · ${re.dealer_results['unknown / conflicting']||0} unknown`;
 for(const e of data.returns){const tr=el('tr'),td=el('td'),b=el('button',e.vin,'vin-link');b.onclick=()=>{drill('returned');$('search').value=e.vin;render();};td.append(b);tr.append(td);for(const v of [e.first_absent.slice(0,10),e.returned.slice(0,10),e.days_to_return,e.dealer_result])tr.append(el('td',String(v)));$('return-body').append(tr);}
 renderTrends();render();
+
 </script></body></html>
