@@ -108,7 +108,7 @@ body .detail-grid{gap:8px 14px;margin:9px 0}
 <div class="breakdown-heading"><h2>Inventory mix</h2><span id="mix-caption" class="muted"></span></div>
 <section class="breakdown-grid" aria-label="Filtered inventory breakdowns"><article class="panel"><div class="panel-heading"><h2>Trim &amp; drivetrain</h2><span class="muted">Select to filter</span></div><div id="combinations" class="bars"></div></article><article class="panel"><div class="panel-heading"><h2>Exterior color</h2><span class="muted">Select to filter</span></div><div id="colors" class="bars"></div></article><article class="panel"><div class="panel-heading"><h2>Geography &amp; dealers</h2><label>Group by<select id="geography-mode"><option value="state">State</option><option value="dealer">Dealer</option></select></label></div><div id="geography" class="bars"></div></article></section>
 <section class="panel" id="vehicle-table">
-<div class="results"><div><h2 id="view-title">Current Inventory</h2><p id="result-count" aria-live="polite"></p></div></div>
+<div class="results"><div><h2 id="view-title">Current Inventory</h2><p id="result-count" aria-live="polite"></p></div><button type="button" id="export-csv">Export filtered results (CSV)</button></div><p id="export-status" class="muted" role="status" aria-live="polite">CSV exports all rows matching the current view, filters and sort, with the source capture timestamp.</p>
 <p class="pricing-note">Select a VIN for vehicle details. Discount = MSRP − Kia feed dealer price; negative differences are labeled Markup. Missing or conflicting pricing shows —. Prices are advertised snapshot values, not transaction prices; incentive inclusion is not specified. Historical labels identify absent vehicles' last-observed prices.</p>
 <section id="vehicle-detail" aria-labelledby="detail-title" hidden></section>
 <div class="table-scroll" tabindex="0" aria-label="Inventory table, scroll horizontally for more columns"><table><thead id="head"></thead><tbody id="body"></tbody></table></div>
@@ -311,7 +311,29 @@ for(const r of data.historicalTracking||[]){
  const tr=el('tr');
  for(const value of [month+(r.partial?' (Partial)':''),r.highest==null?'—':String(r.highest).padStart(6,'0'),r.change==null?'—':(r.change>0?'+':'')+fmt(r.change)])tr.append(el('td',value));
  $('vin-history-body').append(tr);
-}</script><dialog class="favorite-modal" id="favorite-modal"></dialog><script>/* Favorite Searches. No requests, accounts or vehicle-favorite storage. */
+}
+// Client-side export of the exact current view/filter/sort, before pagination.
+function csvText(value){
+ let s=value==null?'':String(value);
+ // Neutralize spreadsheet formula interpretation, including leading whitespace.
+ if (/^[\s\uFEFF]*[=+\-@]/u.test(s)||/^[\t\r\n]/.test(s)) s="'"+s;
+ return '"'+s.replace(/"/g,'""')+'"';
+}
+function csvNumber(value){return value===null||value===undefined?'':(/^-?\d+(?:\.\d+)?$/.test(String(value))?String(value):'');}
+function csvFilterScope(){return JSON.stringify({view,search:$('search').value,filters:Object.fromEntries(Object.entries(filters).map(([k,v])=>[k,[...v].sort()])),scope,dealerSite,favoriteCriteriaDescription:$('favorite-current')?.textContent||'',sort:sortKey,direction:direction===1?'ascending':'descending'});}
+function buildFilteredCsv(){
+ const rows=selectRows(),filterScope=csvFilterScope();
+ const columns=[['VIN',r=>r.vin],['Trim',r=>r.trim],['Drivetrain',r=>r.drive],['Exterior color',r=>r.color],['Dealer',r=>r.dealer],['City',r=>r.city],['State',r=>r.state],['Dealer ZIP',r=>r.zip],['Inventory status',r=>r.status],['Last observed status',r=>r.lastStatus],['MSRP',r=>r.pricing.msrp,true],['Advertised Dealer Price',r=>r.pricing.dealerPrice,true],['Discount',r=>r.pricing.discount,true],['First seen',r=>r.first],['Last seen',r=>r.last],['Window sticker',r=>r.sticker],['Dealer website',r=>r.dealerLinks?.find(x=>x.kind==='dealer_home')?.url||''],['Source capture timestamp',()=>data.latest],['Inventory view',()=>titles[view]],['Filter scope',()=>filterScope]];
+ const lines=[columns.map(([label])=>csvText(label)).join(',')];
+ for(const row of rows)lines.push(columns.map(([,get,numeric])=>numeric?csvNumber(get(row)):csvText(get(row))).join(','));
+ return {text:'\uFEFF'+lines.join('\r\n')+'\r\n',count:rows.length};
+}
+$('export-csv').onclick=()=>{
+ const result=buildFilteredCsv(),url=URL.createObjectURL(new Blob([result.text],{type:'text/csv;charset=utf-8'}));
+ const link=document.createElement('a');link.href=url;link.download=`EV3_${view}_${snapshotDateET}_filtered.csv`;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ $('export-status').textContent=`Exported ${fmt(result.count)} matching VINs from ${snapshotDateET} (ET). Includes all matching rows, not only this page.`;
+};
+</script><dialog class="favorite-modal" id="favorite-modal"></dialog><script>/* Favorite Searches. No requests, accounts or vehicle-favorite storage. */
 (() => {
  'use strict';
  const KEY='ev3.favorite-searches.production.v1';
