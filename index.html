@@ -69,6 +69,10 @@ body .detail-grid{gap:8px 14px;margin:9px 0}
 
 header{padding:10px 24px;gap:14px;flex-wrap:wrap}.compact-brand{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}.compact-brand strong{font-size:22px;letter-spacing:.1px}.compact-brand span{font-size:16px;color:#d8e9e5}.preview-banner{background:#e7f2ed;color:#285c4f;padding:4px 24px;font-size:11px}main{padding:10px 24px}.metrics{gap:8px}.metric{padding:8px 11px}.metric strong{font-size:25px;margin:1px 0}.health{margin:4px 0 6px}.heading{margin:0 0 5px}.heading h1,.heading .eyebrow{display:none}.heading{justify-content:space-between!important;gap:12px}.heading #snapshot{font-size:11px}.heading .snapshot-note{text-align:left;font-size:11px}.heading{justify-content:flex-start}#views{margin-bottom:7px}#views button{padding:6px 10px}.filters{padding:8px 11px;gap:8px}.scope-bar{padding:4px 11px}.favorite-fold{border-top:1px solid #dce5e3}.favorite-fold>summary{padding:5px 11px;font-size:12px}.favorite-searches{border:0}.breakdown-heading{margin:8px 0 4px}.breakdown-grid{gap:9px;margin-bottom:8px}body .breakdown-grid>.panel{padding:0}body .breakdown-grid .panel-heading{padding:8px 12px 5px}body .bars{max-height:160px}body .bar-row{padding:3px 0}.bar-row{padding-top:3px;padding-bottom:3px}.bar-track{margin-top:2px}.results{padding:9px 12px}.pricing-note{margin:4px 12px 8px;font-size:11px}#monthly-proposal{margin-bottom:12px}html{scroll-padding-top:12px}@media(max-width:700px){header{padding:10px 14px}.compact-brand strong{font-size:19px}.compact-brand span{font-size:14px}main{padding:10px 12px}.preview-banner{padding:5px 14px}.metric strong{font-size:23px}}
 .table-scroll{max-height:580px!important}#monthly-movement{padding:16px;margin:14px 0}.monthly-chart{overflow-x:auto}.monthly-chart svg{display:block;width:100%;min-width:560px;max-height:300px}.monthly-table{width:100%;font-size:12px}.heading #capture{font-size:11px}.compact-brand strong{font-size:22px}.compact-brand span{font-size:16px}
+/* Inventory summary cards: actions without a duplicate view switcher. */
+button.metric[data-summary-metric]{display:block;width:100%;min-height:44px;cursor:pointer;text-align:left;font:inherit;color:inherit}
+button.metric[data-summary-metric]:hover{border-color:var(--teal)}
+button.metric[data-summary-metric]:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
 
 /* Favorite-search additions keep existing dashboard typography and use text, borders and icons together. */
 
@@ -148,12 +152,24 @@ function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefine
 const snapshotDateET=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(data.latest));
 $('snapshot').textContent=`Collection date: ${snapshotDateET} (ET) | Data through: ${data.latest.replace('T',' ')} (recorded offset)`;
 $('baseline').textContent=`Latest complete run: ${data.latest}. Prior observed ET-day baseline: ${data.baseline || 'None; new and dropped are zero'}.`;
+$('views').hidden=true;
 for(const [key,label,note] of [['current','Current inventory','All current VINs'],['ds','Dealer Stock','Current'],['it','In Transit','Current'],['new','New Today','Daily comparison'],['dropped','Dropped Today','Daily comparison'],['master','Master VIN total','All observed VINs'],['estimate','Presumed Sales — Persistent DS Disappearances','Estimate · Returns excluded']]){
- const card=el('div',undefined,'metric');card.append(el('span',label),el('strong',fmt(data.metrics[key])),el('small',note));$('metrics').append(card);
-}
-for(const [key,title] of Object.entries(titles)){
- const button=el('button',`${title} (${fmt(data.views[key].length)})`);button.dataset.view=key;
- button.onclick=()=>{view=key;scope='all';page=0;render();};$('views').append(button);
+ const card=el('button',undefined,'metric');card.type='button';card.dataset.summaryMetric=key;
+ card.title='Show matching VINs and reset other inventory filters';
+ card.setAttribute('aria-controls','vehicle-table');
+ card.onclick=()=>{
+  closeFilter();
+  clearFilters();detailVin=null;detailReturnTarget=null;
+  view=key==='ds'||key==='it'?'current':key==='estimate'?'master':key;
+  scope=key==='estimate'?'presumed':'all';
+  if(key==='ds'||key==='it')filters.status.add(key==='ds'?'Dealer Stock':'In Transit');
+  page=0;render();
+  const target=$('vehicle-table');
+  target.tabIndex=-1;
+  target.focus({preventScroll:true});
+  target.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
+ };
+ card.append(el('span',label),el('strong',fmt(data.metrics[key])),el('small',note));$('metrics').append(card);
 }
 const filterControls={};let openFilter=null;
 function closeFilter(focus=false){if(!openFilter)return;const control=filterControls[openFilter];control.panel.hidden=true;control.button.setAttribute('aria-expanded','false');openFilter=null;if(focus)control.button.focus();}
@@ -242,7 +258,6 @@ function renderDetail(rows){
  panel.append(el('p',(r.dealerLinks||[]).length?'Dealer website from saved Kia dealer information, not a verified listing for this VIN. Confirm availability with the dealer, especially for in-transit or historical vehicles.':'Dealer website not available in retained source information.','muted'));
 }
 function render(){
- document.querySelectorAll('#views button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===view)));
  $('view-title').textContent=titles[view];
  const rows=selectRows(),pages=Math.max(1,Math.ceil(rows.length/pageSize));page=Math.min(page,pages-1);
  renderDetail(rows);
