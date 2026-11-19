@@ -579,15 +579,15 @@ $('export-csv').onclick=()=>{
  const status=r=>record(r).status;
  const selectOriginal=selectRows;
  selectRows=function(){return selectOriginal().filter(r=>!choice||(eligible(r)&&status(r)===choice));};
- const wrapper=el('div',undefined,'multi-filter wind-nightfall-control'),label=el('label','Wind Nightfall option'),select=el('select'),clear=el('button','Clear Nightfall');
+ const wrapper=el('div',undefined,'multi-filter wind-nightfall-control'),label=el('label','Nightfall'),select=el('select'),clear=el('button','Clear Nightfall');
  wrapper.id='wind-nightfall-control';select.id='wind-nightfall-select';label.htmlFor=select.id;select.setAttribute('aria-describedby','wind-nightfall-coverage');clear.id='wind-nightfall-clear';clear.type='button';
- select.add(new Option('Any - not filtered',''));for(const [value,text] of Object.entries(labels))select.add(new Option(text,value));
+ const placeholder=new Option('Choose Nightfall option','',true,true);placeholder.disabled=true;select.add(placeholder);for(const value of ['equipped','without'])select.add(new Option(labels[value],value));
  const line=el('div',undefined,'wind-nightfall-inline');line.append(select,clear);wrapper.append(label,line);document.getElementById('filter-drive').closest('.multi-filter').after(wrapper);
  const note=el('p',undefined,'wind-nightfall-coverage');note.id='wind-nightfall-coverage';
  const current=data.rows.filter(r=>sets.current.has(r.vin)&&eligible(r)),known=current.filter(r=>status(r)!=='unknown').length;
  note.textContent=`Wind Nightfall option: ${known.toLocaleString()} of ${current.length.toLocaleString()} current Wind VINs verified; ${(current.length-known).toLocaleString()} unknown. Other trims are outside this paid-option filter. Summary cards and history retain source totals.`;
  document.getElementById('selects').after(note);
- function set(value){if(!['',...Object.keys(labels)].includes(value))throw Error('Unsupported Nightfall choice');choice=value;select.value=value;}
+ function set(value){if(['unknown','all','any'].includes(value))value='';if(!['','equipped','without'].includes(value))throw Error('Unsupported Nightfall choice');choice=value;select.value=value;}
  select.onchange=()=>{set(select.value);page=0;render();};clear.onclick=()=>{set('');page=0;render();};
  const clearOriginal=clearFilters;clearFilters=function(){set('');return clearOriginal();};
  const detailOriginal=renderDetail;renderDetail=function(rows){detailOriginal(rows);const row=data.rows.find(r=>r.vin===detailVin),grid=document.querySelector('#vehicle-detail .detail-grid');if(row&&grid&&eligible(row))grid.append(el('dt','Wind Nightfall option'),el('dd',(labels[status(row)]||'Wind - unknown')+' - '+(reasons[record(row).basis]||reasons['not-verified'])));};
@@ -626,7 +626,8 @@ $('export-csv').onclick=()=>{
  function validateCriteria(c){
   if(!Object.prototype.hasOwnProperty.call(c,'windNightfall'))c={...c,windNightfall:''};
   shape(c,['query','filters','view','scope','dealerSite','windNightfall'],'search');
-  if(!['','equipped','without','unknown'].includes(c.windNightfall))throw Error('Unsupported Wind Nightfall filter.');
+  if(['unknown','all','any'].includes(c.windNightfall))c={...c,windNightfall:''};
+  if(!['','equipped','without'].includes(c.windNightfall))throw Error('Unsupported Wind Nightfall filter.');
   text(c.query,LIMIT.query,'Search text');
   if(!views.includes(c.view)||!scopes.includes(c.scope))throw Error('Unsupported inventory view or drilldown.');
   if(c.scope!=='all'&&c.view!=='master')throw Error('This drilldown requires the Master VIN view.');
