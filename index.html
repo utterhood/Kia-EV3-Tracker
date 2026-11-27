@@ -261,6 +261,8 @@ const exteriorSwatch = (() => {
 })();
 const titles = {current:'Current Inventory',new:'New Today',dropped:'Dropped Today',master:'Master VIN List'};
 const fields = {state:'State',dealer:'Dealer name',trim:'Trim',drive:'Drivetrain',color:'Exterior color',status:'Inventory status'};
+const isPresumedSold=r=>r.status==='Absent / Dropped'&&r.lastStatus==='DS';
+const inventoryFilterStatus=r=>isPresumedSold(r)?'Presumed Sold':r.status;
 const baseColumns = [['vin','VIN'],['trim','Trim'],['drive','Drivetrain'],['color','Exterior color'],['dealer','Dealer'],['location','Location'],['status','Status'],['first','First seen'],['last','Last seen'],['sticker','Window sticker']];
 let view='current', sortKey='vin', direction=1, page=0, scope='all', dealerSite=null;
 const pricingColumns=[['msrp','MSRP'],['dealerPrice','Dealer price'],['discount','Discount']];
@@ -294,7 +296,7 @@ const snapshotDateET=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York
 $('snapshot').textContent=`Collection date: ${snapshotDateET} (ET) | Data through: ${data.latest.replace('T',' ')} (recorded offset)`;
 $('baseline').textContent=`Latest complete run: ${data.latest}. Prior observed ET-day baseline: ${data.baseline || 'None; new and dropped are zero'}.`;
 $('views').hidden=true;
-for(const [key,label,note] of [['current','Current inventory','All current VINs'],['ds','Dealer Stock','Current'],['it','In Transit','Current'],['new','New Today','Daily comparison'],['dropped','Dropped Today','Daily comparison'],['master','Master VIN total','All observed VINs'],['estimate','Presumed Sales — Persistent DS Disappearances','Estimate · Returns excluded']]){
+for(const [key,label,note] of [['current','Current inventory','All current VINs'],['ds','Dealer Stock','Current'],['it','In Transit','Current'],['new','New Today','Daily comparison'],['dropped','Dropped Today','Daily comparison'],['master','Master VIN total','All observed VINs'],['estimate','Presumed Sold','Estimate · Returns excluded']]){
  const card=el('button',undefined,'metric');card.type='button';card.dataset.summaryMetric=key;
  card.title='Show matching VINs and reset other inventory filters';
  card.setAttribute('aria-controls','vehicle-table');
@@ -302,7 +304,8 @@ for(const [key,label,note] of [['current','Current inventory','All current VINs'
   closeFilter();
   clearFilters();detailVin=null;detailReturnTarget=null;
   view=key==='ds'||key==='it'?'current':key==='estimate'?'master':key;
-  scope=key==='estimate'?'presumed':'all';
+  scope='all';
+  if(key==='estimate')filters.status.add('Presumed Sold');
   if(key==='ds'||key==='it')filters.status.add(key==='ds'?'Dealer Stock':'In Transit');
   page=0;render();
  };
@@ -325,13 +328,13 @@ for(const [key,title] of Object.entries(fields)){
  label.id=`filter-label-${key}`;button.id=`filter-${key}`;button.type='button';button.setAttribute('aria-labelledby',label.id+' '+button.id);button.setAttribute('aria-expanded','false');button.setAttribute('aria-controls',`filter-panel-${key}`);
  const panel=el('div',undefined,'filter-popup');panel.id=`filter-panel-${key}`;panel.hidden=true;panel.setAttribute('role','group');panel.setAttribute('aria-label',title+' selections');
  const toolbar=el('div',undefined,'filter-toolbar'),all=el('button','All / clear','filter-all'),done=el('button','Done');
- all.type=done.type='button';all.onclick=()=>{filters[key].clear();if(key==='dealer'||key==='state')dealerSite=null;if(key==='dealer')window.favoriteSearches?.clearDealerConstraint();page=0;render();};done.onclick=()=>closeFilter(true);toolbar.append(all,done);
+ all.type=done.type='button';all.onclick=()=>{filters[key].clear();if(key==='status'&&scope==='presumed')scope='all';if(key==='dealer'||key==='state')dealerSite=null;if(key==='dealer')window.favoriteSearches?.clearDealerConstraint();page=0;render();};done.onclick=()=>closeFilter(true);toolbar.append(all,done);
  const search=el('input');search.type='search';search.placeholder='Find '+title.toLowerCase();search.setAttribute('aria-label','Find '+title.toLowerCase()+' options');
  const note=el('p',undefined,'filter-help');note.textContent='Any selected value matches. No selections means All.';
  const list=el('div',undefined,'filter-options'),options=[];
- for(const value of [...new Set(data.rows.map(r=>r[key]))].sort((a,b)=>a.localeCompare(b))){
+ for(const value of key==='status'?['Dealer Stock','In Transit','Presumed Sold']:[...new Set(data.rows.map(r=>r[key]))].sort((a,b)=>a.localeCompare(b))){
   const row=el('label',undefined,'filter-option'),box=el('input'),text=el('span',value||'(Unknown)'),availability=el('small');box.type='checkbox';box.value=value;
-  box.onchange=()=>{if(box.checked)filters[key].add(value);else filters[key].delete(value);if(key==='dealer'||key==='state')dealerSite=null;if(key==='dealer')window.favoriteSearches?.clearDealerConstraint();page=0;render();};
+  box.onchange=()=>{if(box.checked)filters[key].add(value);else filters[key].delete(value);if(key==='status'&&value==='Presumed Sold'&&box.checked&&view==='current')view='master';if(key==='status'&&scope==='presumed')scope='all';if(key==='dealer'||key==='state')dealerSite=null;if(key==='dealer')window.favoriteSearches?.clearDealerConstraint();page=0;render();};
   row.append(box,text,availability);list.append(row);options.push({value,row,box,availability});
  }
  search.oninput=()=>{for(const option of options)option.row.hidden=!(option.value||'(Unknown)').toLowerCase().includes(search.value.toLowerCase().trim());};
@@ -345,7 +348,7 @@ document.addEventListener('focusin',e=>{if(openFilter){const c=filterControls[op
 addEventListener('resize',positionFilter);addEventListener('scroll',positionFilter,true);
 window.visualViewport?.addEventListener('resize',positionFilter);window.visualViewport?.addEventListener('scroll',positionFilter);
 function syncFilters(){
- const available=Object.fromEntries(Object.keys(fields).map(k=>[k,new Set(data.rows.filter(r=>sets[view].has(r.vin)).map(r=>r[k]))]));let unavailable=0;
+ const available=Object.fromEntries(Object.keys(fields).map(k=>[k,new Set(data.rows.filter(r=>sets[view].has(r.vin)).map(r=>k==='status'?inventoryFilterStatus(r):r[k]))]));let unavailable=0;
  for(const [key,c] of Object.entries(filterControls)){
   const selected=[...filters[key]];c.button.textContent=selected.length===0?'All':selected.length===1?(selected[0]||'(Unknown)'):selected.length+' selected';c.button.title=selected.map(v=>v||'(Unknown)').join(', ')||'All';
   for(const o of c.options){o.box.checked=filters[key].has(o.value);const absent=!available[key].has(o.value);o.availability.textContent=absent?'Not in this view':'';if(absent&&o.box.checked)unavailable++;}
@@ -354,7 +357,7 @@ function syncFilters(){
 }
 function selectRows(){
  const words=$('search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
- return data.rows.filter(r=>sets[view].has(r.vin)&&(!window.favoriteSearches||window.favoriteSearches.matchesDealer(r))&&(!dealerSite||JSON.stringify([r.dealer,r.city,r.state])===dealerSite)&&(scope==='all'||scope==='presumed'&&r.status==='Absent / Dropped'&&r.lastStatus==='DS'||scope==='returned'&&data.returnedVins.includes(r.vin))&&Object.entries(filters).every(([k,values])=>values.size===0||values.has(r[k]))&&words.every(w=>[r.vin,r.dealer,r.city,r.zip].join(' ').toLowerCase().includes(w)))
+ return data.rows.filter(r=>sets[view].has(r.vin)&&(!window.favoriteSearches||window.favoriteSearches.matchesDealer(r))&&(!dealerSite||JSON.stringify([r.dealer,r.city,r.state])===dealerSite)&&(scope==='all'||scope==='presumed'&&isPresumedSold(r)||scope==='returned'&&data.returnedVins.includes(r.vin))&&Object.entries(filters).every(([k,values])=>values.size===0||values.has(k==='status'?inventoryFilterStatus(r):r[k])||(k==='status'&&values.has('Absent / Dropped')&&r.status==='Absent / Dropped'))&&words.every(w=>[r.vin,r.dealer,r.city,r.zip].join(' ').toLowerCase().includes(w)))
  .sort((a,b)=>{
   if(sortKey==='vin')return compareVinSuffix(a.vin,b.vin,direction);
   if(pricingColumns.some(([k])=>k===sortKey)){
@@ -397,7 +400,7 @@ function renderDetail(rows){
  panel.append(el('p',(r.dealerLinks||[]).length?'Dealer website from saved Kia dealer information, not a verified listing for this VIN. Confirm availability with the dealer, especially for in-transit or historical vehicles.':'Dealer website not available in retained source information.','muted'));
 }
 function activeSummaryMetric(){
- if(scope==='presumed')return view==='master'?'estimate':null;
+ if(scope==='presumed'||(scope==='all'&&view==='master'&&filters.status.size===1&&filters.status.has('Presumed Sold')))return view==='master'?'estimate':null;
  if(scope!=='all')return null;
  if(view!=='current')return view;
  const selected=filters.status;
@@ -443,7 +446,7 @@ $('reset').onclick=()=>{clearFilters();scope='all';page=0;render();};
 $('prev').onclick=()=>{page--;render();};$('next').onclick=()=>{page++;render();};
 
 function clearFilters(){window.favoriteSearches?.clearDealerConstraint();dealerSite=null;for(const k of Object.keys(fields))filters[k].clear();$('search').value='';}
-function drill(which){clearFilters();view='master';scope=which;page=0;render();$('inventory').scrollIntoView({behavior:'smooth',block:'start'});}
+function drill(which){clearFilters();view='master';scope=which==='presumed'?'all':which;if(which==='presumed')filters.status.add('Presumed Sold');page=0;render();$('inventory').scrollIntoView({behavior:'smooth',block:'start'});}
 $('presumed-drill').onclick=()=>drill('presumed');$('returns-drill').onclick=()=>drill('returned');
 $('clear-scope').onclick=()=>{scope='all';dealerSite=null;page=0;render();};
 function groupRows(rows,keys){const groups=new Map();for(const r of rows){const values=keys.map(k=>r[k]),id=JSON.stringify(values);if(!groups.has(id))groups.set(id,{values,count:0});groups.get(id).count++;}return [...groups.values()].sort((a,b)=>b.count-a.count||a.values.join().localeCompare(b.values.join()));}
